@@ -9,6 +9,8 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.glucoring.ble.model.BleConnectionState
 import kotlinx.coroutines.channels.Channel
@@ -45,6 +47,7 @@ internal class BleGattManager(private val context: Context) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private var gatt: BluetoothGatt? = null
     private val writeQueue: Queue<ByteArray> = LinkedList()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _connectionState = MutableStateFlow<BleConnectionState>(BleConnectionState.Disconnected)
     val connectionState: StateFlow<BleConnectionState> = _connectionState
@@ -82,7 +85,19 @@ internal class BleGattManager(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun send(command: ByteArray) {
         writeQueue.offer(command)
-        if (writeQueue.size == 1) writeNext()
+        if (writeQueue.size == 1) scheduleWriteNext()
+    }
+
+    /**
+     * The vendor's own demo app (BleService.writeValue) delays every single write by
+     * 500ms via a Handler before touching the GATT connection, unconditionally — not
+     * just for the first command. That's the proven-working pacing for this exact
+     * hardware, so we mirror it exactly rather than writing as fast as the queue allows:
+     * firmware on cheap BLE modules like this one can silently drop commands sent too
+     * close together, which would look exactly like "nothing happens" from the app side.
+     */
+    private fun scheduleWriteNext() {
+        mainHandler.postDelayed({ writeNext() }, 500)
     }
 
     @SuppressLint("MissingPermission", "DEPRECATION")
@@ -136,7 +151,7 @@ internal class BleGattManager(private val context: Context) {
         // callback that will never come for this write type.
         if (!ok || writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
             writeQueue.poll()
-            if (writeQueue.isNotEmpty()) writeNext()
+            if (writeQueue.isNotEmpty()) scheduleWriteNext()
         }
     }
 
@@ -145,6 +160,20 @@ internal class BleGattManager(private val context: Context) {
         val service = g.getService(SERVICE_DATA) ?: return
         val characteristic = service.getCharacteristic(NOTIFY_CHARACTERISTIC) ?: return
         g.setCharacteristicNotification(characteristic, true)
+
+        // Matches the vendor's own demo app exactly (BleService.setCharacteristicNotification):
+        // it sleeps 20ms between enabling the characteristic notification locally and writing
+        // the CCCD descriptor to the remote device. Skipping this gap is a known source of
+        // silently-failed descriptor writes on some BLE stacks (the local notification-enable
+        // hasn't settled yet), which would explain measurements never producing any data even
+        // though the connection itself looks fine. This callback runs on a Binder thread, not
+        // the UI thread, so a blocking sleep here is safe (same as the vendor's own code).
+        try {
+            Thread.sleep(20)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+
         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG) ?: return
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -190,7 +219,7 @@ internal class BleGattManager(private val context: Context) {
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             Log.d(TAG, "onCharacteristicWrite: status=$status")
             writeQueue.poll()
-            if (writeQueue.isNotEmpty()) writeNext()
+            if (writeQueue.isNotEmpty()) scheduleWriteNext()
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
