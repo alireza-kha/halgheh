@@ -98,9 +98,26 @@ Central). برای این‌که در **GitHub Actions** واقعاً بیلد �
 - **`.github/workflows/android-ci.yml`** — روی هر push/PR به شاخه‌ی `main`،
   JDK 17 و Android SDK (پلتفرم 34 + build-tools 34.0.0) را نصب می‌کند،
   `./gradlew assembleDebug` و `./gradlew testDebugUnitTest` را اجرا می‌کند، و
-  APK دیباگ را به‌عنوان artifact قابل‌دانلود آپلود می‌کند.
+  APK دیباگ را هم به‌عنوان artifact و هم (روی push به `main`) به‌عنوان یک
+  **GitHub Release دائمی** منتشر می‌کند.
 - **`.gitignore`** استاندارد اندروید/Gradle (شامل `local.properties`، پوشه‌های
   `build/`، `.idea/` و غیره) و یک `local.properties.example` به‌جایش.
+
+### دانلود APK بدون سرچ توی تب Actions
+
+بعد از اولین push موفق، APK دیباگ همیشه اینجا در دسترسه (لینک ثابت، بدون
+لاگین، بدون انقضا — با هر push به `main` آپدیت می‌شه):
+
+```
+https://github.com/<owner>/<repo>/releases/tag/latest-debug
+```
+
+(روش قدیمی‌تر هم هنوز هست: تب Actions → اجرای موردنظر → پایین صفحه →
+artifact با نام `glucoring-debug-apk`، ولی این یکی بعد از ۹۰ روز منقضی
+می‌شه و نیاز به لاگین گیت‌هاب داره.)
+
+⚠️ این APK امضای دیباگ داره (نه امضای انتشار) و صرفاً برای تست روی دستگاه
+خودتونه، نه توزیع عمومی.
 
 ### قدم‌ها برای push کردن به گیت‌هاب
 
