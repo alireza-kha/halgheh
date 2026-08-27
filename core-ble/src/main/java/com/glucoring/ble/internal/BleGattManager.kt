@@ -90,19 +90,53 @@ internal class BleGattManager(private val context: Context) {
         val current = gatt ?: return
         val data = writeQueue.peek() ?: return
         val service = current.getService(SERVICE_DATA) ?: run {
-            Log.w(TAG, "writeNext: data service not found yet")
+            Log.w(TAG, "writeNext: data service ($SERVICE_DATA) not found on this device yet")
             return
         }
-        val characteristic = service.getCharacteristic(WRITE_CHARACTERISTIC) ?: return
+        val characteristic = service.getCharacteristic(WRITE_CHARACTERISTIC) ?: run {
+            Log.e(TAG, "writeNext: write characteristic ($WRITE_CHARACTERISTIC) not found — check the UUID against your actual ring's GATT table")
+            return
+        }
 
-        // The (characteristic, value, writeType) overload was added in API 33;
-        // minSdk here is 26, so older devices still need the deprecated
-        // value-then-writeCharacteristic(characteristic) path.
+        // Some cheap BLE modules (this ring included, apparently) only
+        // advertise WRITE_NO_RESPONSE on their command characteristic, not
+        // WRITE_TYPE_DEFAULT (write-with-ack). Hard-coding DEFAULT meant
+        // every write silently failed and onCharacteristicWrite never fired,
+        // so the queue got stuck forever after the very first command —
+        // matching "nothing happens when I tap start". Pick whichever the
+        // characteristic actually supports instead.
+        val supportsWriteWithResponse = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+        val supportsWriteNoResponse = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        val writeType = when {
+            supportsWriteWithResponse -> BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            supportsWriteNoResponse -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            else -> {
+                Log.e(TAG, "writeNext: characteristic advertises neither WRITE nor WRITE_NO_RESPONSE (properties=${characteristic.properties}) — command cannot be sent")
+                writeQueue.poll()
+                return
+            }
+        }
+
+        Log.d(TAG, "writeNext: sending ${data.size} bytes [${data.joinToString(" ") { "%02x".format(it) }}] writeType=$writeType")
+
+        val ok: Boolean
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            current.writeCharacteristic(characteristic, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            val status = current.writeCharacteristic(characteristic, data, writeType)
+            ok = status == android.bluetooth.BluetoothStatusCodes.SUCCESS
+            if (!ok) Log.e(TAG, "writeNext: writeCharacteristic (API 33+) failed, status=$status")
         } else {
+            characteristic.writeType = writeType
             characteristic.value = data
-            current.writeCharacteristic(characteristic)
+            ok = current.writeCharacteristic(characteristic)
+            if (!ok) Log.e(TAG, "writeNext: writeCharacteristic (legacy) returned false")
+        }
+
+        // WRITE_TYPE_NO_RESPONSE never triggers onCharacteristicWrite, so we
+        // have to drain the queue here ourselves instead of waiting for a
+        // callback that will never come for this write type.
+        if (!ok || writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+            writeQueue.poll()
+            if (writeQueue.isNotEmpty()) writeNext()
         }
     }
 
@@ -124,6 +158,7 @@ internal class BleGattManager(private val context: Context) {
     private val gattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            Log.d(TAG, "onConnectionStateChange: status=$status newState=$newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     g.discoverServices()
@@ -135,6 +170,7 @@ internal class BleGattManager(private val context: Context) {
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            Log.d(TAG, "onServicesDiscovered: status=$status services=${g.services.map { it.uuid }}")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 enableNotifications(g)
             } else {
@@ -143,6 +179,7 @@ internal class BleGattManager(private val context: Context) {
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            Log.d(TAG, "onDescriptorWrite: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 _connectionState.value = BleConnectionState.Connected
             } else {
@@ -151,12 +188,14 @@ internal class BleGattManager(private val context: Context) {
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            Log.d(TAG, "onCharacteristicWrite: status=$status")
             writeQueue.poll()
             if (writeQueue.isNotEmpty()) writeNext()
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             // Called instead of the 2-arg overload below on API 33+.
+            Log.d(TAG, "onCharacteristicChanged (API33+): [${value.joinToString(" ") { "%02x".format(it) }}]")
             incomingFrames.trySend(value)
         }
 
@@ -164,6 +203,7 @@ internal class BleGattManager(private val context: Context) {
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             val value = characteristic.value ?: return
+            Log.d(TAG, "onCharacteristicChanged (legacy): [${value.joinToString(" ") { "%02x".format(it) }}]")
             incomingFrames.trySend(value)
         }
     }

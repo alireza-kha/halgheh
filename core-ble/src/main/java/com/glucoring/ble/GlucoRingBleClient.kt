@@ -28,6 +28,10 @@ import kotlinx.coroutines.launch
  */
 class GlucoRingBleClient(context: Context) {
 
+    private companion object {
+        private const val TAG = "GlucoRingBleClient"
+    }
+
     private val appContext = context.applicationContext
     private val scanner = DeviceScanner(appContext)
     private val gatt = BleGattManager(appContext)
@@ -51,6 +55,7 @@ class GlucoRingBleClient(context: Context) {
         // the result comes back through `listener` (see SdkDataListener).
         scope.launch {
             gatt.observeRawFrames().collect { frame ->
+                android.util.Log.d(TAG, "observeRawFrames: got ${frame.size} bytes, handing to BleSDK.DataParsingWithData")
                 BleSDK.DataParsingWithData(frame, listener)
             }
         }
@@ -73,7 +78,9 @@ class GlucoRingBleClient(context: Context) {
      * @param intervalSeconds vendor doc specifies a 30s minimum.
      */
     fun startVitalsAutoMeasurement(mode: AutoTestMode = AutoTestMode.AutoHeartRate, intervalSeconds: Long = 30) {
-        gatt.send(BleSDK.SetDeviceMeasurementWithType(mode, intervalSeconds, true))
+        val command = BleSDK.SetDeviceMeasurementWithType(mode, intervalSeconds, true)
+        android.util.Log.d(TAG, "startVitalsAutoMeasurement: mode=$mode intervalSeconds=$intervalSeconds command=${command.joinToString(" ") { "%02x".format(it) }}")
+        gatt.send(command)
     }
 
     fun stopVitalsAutoMeasurement(mode: AutoTestMode = AutoTestMode.AutoHeartRate) {

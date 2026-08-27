@@ -1,5 +1,6 @@
 package com.glucoring.ble.internal
 
+import android.util.Log
 import com.glucoring.ble.model.PpgSample
 import com.glucoring.ble.model.VitalsSample
 import com.jstyle.blesdk2301.callback.DataListener2301
@@ -15,19 +16,38 @@ import com.jstyle.blesdk2301.callback.DataListener2301
  *    present in this SDK build's DeviceKey constants; NOT covered by the
  *    vendor's shipped documentation, which only documents the periodic
  *    auto-measurement command below — see startVitalsAutoMeasurement()).
- *  - `heartValue` / `Blood_oxygen` / `highPressure` / `lowPressure` / `hrvValue`
- *    / `stress`: periodic vitals from the documented 0x28 health-measurement
- *    command.
+ *  - `heartRate` / `Blood_oxygen` / `highPressure` / `lowPressure` / `hrv`:
+ *    periodic vitals from the documented 0x28 health-measurement command —
+ *    these names come from the vendor doc's description of the `AutoMode`
+ *    model class fields, not from a confirmed Map key dump.
  *
- * If a future SDK/firmware revision changes these key names, this is the one
- * place that needs updating.
+ * IMPORTANT: the exact key names above are best-effort, not verified against
+ * a real device. Every callback is logged in full below — if vitals/PPG
+ * aren't showing up in the app despite the ring notifying (check
+ * BleGattManager's "onCharacteristicChanged" logs), check logcat for this
+ * class's TAG and compare the real key names against what's read below, then
+ * fix the mismatches here.
  */
 internal class SdkDataListener(
     private val onPpgFrame: (PpgSample) -> Unit,
     private val onVitals: (VitalsSample) -> Unit,
 ) : DataListener2301 {
 
+    companion object {
+        private const val TAG = "SdkDataListener"
+    }
+
     override fun dataCallback(data: Map<String, Any>) {
+        Log.d(TAG, "dataCallback(Map) keys=${data.keys}")
+        for ((key, value) in data) {
+            val preview = when (value) {
+                is IntArray -> "IntArray(size=${value.size}) first10=${value.take(10)}"
+                is List<*> -> "List(size=${value.size}) first10=${value.take(10)}"
+                else -> value.toString()
+            }
+            Log.d(TAG, "  $key = $preview")
+        }
+
         val now = System.currentTimeMillis()
 
         val rawGreen = (data["arrayPpgRawData"] as? IntArray)
@@ -38,7 +58,7 @@ internal class SdkDataListener(
                 PpgSample(
                     timestampMs = now,
                     rawGreen = rawGreen,
-                    heartRateBpm = (data["heartValue"] as? Number)?.toInt(),
+                    heartRateBpm = (data["heartRate"] as? Number)?.toInt(),
                     spo2Percent = (data["Blood_oxygen"] as? Number)?.toInt(),
                     accelX = toIntArrayOrNull(data["arrayX"]),
                     accelY = toIntArrayOrNull(data["arrayY"]),
@@ -61,10 +81,13 @@ internal class SdkDataListener(
                     stress = (data["stress"] as? Number)?.toInt(),
                 )
             )
+        } else {
+            Log.d(TAG, "dataCallback(Map): no known vitals keys present in this frame")
         }
     }
 
     override fun dataCallback(raw: ByteArray) {
+        Log.d(TAG, "dataCallback(byte[]): [${raw.joinToString(" ") { "%02x".format(it) }}]")
         // Some frame types are surfaced only as raw bytes by the SDK.
         // Not currently needed for the glucose pipeline — left as an
         // extension point (e.g. for firmware/debug frames).

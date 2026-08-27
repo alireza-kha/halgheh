@@ -4,6 +4,7 @@ import com.glucoring.data.db.AppDatabase
 import com.glucoring.data.db.entity.CalibrationModelEntity
 import com.glucoring.data.db.entity.GlucoseReferenceEntity
 import com.glucoring.data.db.entity.PpgWindowEntity
+import com.glucoring.data.db.entity.UserProfileEntity
 import com.glucoring.signal.FeatureVector
 import kotlinx.coroutines.flow.Flow
 
@@ -102,6 +103,21 @@ class GlucoRepository(private val db: AppDatabase) {
     fun observeActiveModel(): Flow<CalibrationModelEntity?> = db.calibrationModelDao().observeActive()
 
     fun observeModelHistory(): Flow<List<CalibrationModelEntity>> = db.calibrationModelDao().observeHistory()
+
+    // ---- User profile ---------------------------------------------------
+
+    suspend fun getProfile(): UserProfileEntity = db.userProfileDao().get() ?: UserProfileEntity.default()
+
+    fun observeProfile(): Flow<UserProfileEntity?> = db.userProfileDao().observe()
+
+    suspend fun saveProfile(profile: UserProfileEntity) = db.userProfileDao().upsert(profile)
+
+    /** Called whenever a successful connection happens, so Profile can show/offer to disconnect the right device. */
+    suspend fun rememberPairedDevice(name: String?, mac: String?) {
+        // Upsert-safe even if no profile row exists yet.
+        val current = db.userProfileDao().get() ?: UserProfileEntity.default()
+        db.userProfileDao().upsert(current.copy(pairedDeviceName = name, pairedDeviceMac = mac))
+    }
 }
 
 data class CalibrationReadiness(

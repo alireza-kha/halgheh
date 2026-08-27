@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import com.glucoring.app.ui.calibration.CalibrationViewModel
 import com.glucoring.app.ui.history.HistoryViewModel
 import com.glucoring.app.ui.monitor.MonitorViewModel
+import com.glucoring.app.ui.profile.ProfileViewModel
 import com.glucoring.app.ui.scan.ScanViewModel
 
 /**
@@ -28,3 +29,7 @@ fun calibrationViewModel(serviceLocator: ServiceLocator): CalibrationViewModel =
 @Composable
 fun historyViewModel(serviceLocator: ServiceLocator): HistoryViewModel =
     viewModel(factory = viewModelFactory { initializer { HistoryViewModel(serviceLocator) } })
+
+@Composable
+fun profileViewModel(serviceLocator: ServiceLocator): ProfileViewModel =
+    viewModel(factory = viewModelFactory { initializer { ProfileViewModel(serviceLocator) } })

@@ -44,6 +44,11 @@ class ScanViewModel(private val serviceLocator: ServiceLocator) : ViewModel() {
     fun connect(device: ScannedDevice) {
         stopScan()
         serviceLocator.bleClient.connect(device.macAddress)
+        // So Profile can show "متصل به …" and offer a disconnect button even
+        // after the user navigates away from this screen.
+        viewModelScope.launch {
+            serviceLocator.repository.rememberPairedDevice(device.name, device.macAddress)
+        }
     }
 
     override fun onCleared() {
