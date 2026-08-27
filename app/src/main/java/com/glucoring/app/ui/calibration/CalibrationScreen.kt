@@ -52,86 +52,103 @@ fun CalibrationScreen(serviceLocator: ServiceLocator, nav: NavHostController) {
     var glucoseInput by remember { mutableStateOf("") }
     var selectedContext by remember { mutableStateOf(contexts.first()) }
     var contextMenuExpanded by remember { mutableStateOf(false) }
+    val dateFormat = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("کالیبراسیون با سوزن") }) }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
+        // Single scrollable LazyColumn for the whole screen — the form and
+        // status cards used to sit in a plain (non-scrolling) Column above a
+        // LazyColumn, so on smaller screens or with many calibration points
+        // there was no way to scroll down to the save button or the rest of
+        // the history. Putting everything in one LazyColumn as `item {}` /
+        // `items(...)` blocks fixes that.
+        LazyColumn(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(16.dp),
+        ) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("ثبت مقدار قند خون اندازه‌گیری‌شده با سوزن")
 
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("ثبت مقدار قند خون اندازه‌گیری‌شده با سوزن")
+                        OutlinedTextField(
+                            value = glucoseInput,
+                            onValueChange = { glucoseInput = it.filter { c -> c.isDigit() } },
+                            label = { Text("mg/dL") },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        )
 
-                    OutlinedTextField(
-                        value = glucoseInput,
-                        onValueChange = { glucoseInput = it.filter { c -> c.isDigit() } },
-                        label = { Text("mg/dL") },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
-
-                    Row(Modifier.padding(top = 8.dp)) {
-                        TextButton(onClick = { contextMenuExpanded = true }) {
-                            Text(contextLabel(selectedContext))
-                        }
-                        DropdownMenu(expanded = contextMenuExpanded, onDismissRequest = { contextMenuExpanded = false }) {
-                            contexts.forEach { c ->
-                                DropdownMenuItem(text = { Text(contextLabel(c)) }, onClick = {
-                                    selectedContext = c
-                                    contextMenuExpanded = false
-                                })
+                        Row(Modifier.padding(top = 8.dp)) {
+                            TextButton(onClick = { contextMenuExpanded = true }) {
+                                Text(contextLabel(selectedContext))
+                            }
+                            DropdownMenu(expanded = contextMenuExpanded, onDismissRequest = { contextMenuExpanded = false }) {
+                                contexts.forEach { c ->
+                                    DropdownMenuItem(text = { Text(contextLabel(c)) }, onClick = {
+                                        selectedContext = c
+                                        contextMenuExpanded = false
+                                    })
+                                }
                             }
                         }
+
+                        Button(
+                            onClick = {
+                                glucoseInput.toIntOrNull()?.let { value ->
+                                    vm.addReading(value, selectedContext, note = null)
+                                    glucoseInput = ""
+                                }
+                            },
+                            modifier = Modifier.padding(top = 8.dp),
+                            enabled = glucoseInput.toIntOrNull() != null,
+                        ) { Text("ثبت") }
                     }
-
-                    Button(
-                        onClick = {
-                            glucoseInput.toIntOrNull()?.let { value ->
-                                vm.addReading(value, selectedContext, note = null)
-                                glucoseInput = ""
-                            }
-                        },
-                        modifier = Modifier.padding(top = 8.dp),
-                        enabled = glucoseInput.toIntOrNull() != null,
-                    ) { Text("ثبت") }
                 }
             }
 
             readiness?.let { r ->
-                Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("وضعیت آمادگی کالیبراسیون")
-                        Text("تعداد نقاط ثبت‌شده: ${r.pointCount} (حداقل لازم برای شروع: 6)")
-                        Text("دامنه‌ی مقادیر: ${r.valueSpreadMgDl} mg/dL (باید حداقل نقاط متنوع، نه همه نزدیک هم، باشند)")
-                        Button(onClick = { vm.retrain() }, enabled = r.isReady, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("آموزش/به‌روزرسانی مدل شخصی")
+                item {
+                    Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("وضعیت آمادگی کالیبراسیون")
+                            Text("تعداد نقاط ثبت‌شده: ${r.pointCount} (حداقل لازم برای شروع: 6)")
+                            Text("دامنه‌ی مقادیر: ${r.valueSpreadMgDl} mg/dL (باید حداقل نقاط متنوع، نه همه نزدیک هم، باشند)")
+                            Button(onClick = { vm.retrain() }, enabled = r.isReady, modifier = Modifier.padding(top = 8.dp)) {
+                                Text("آموزش/به‌روزرسانی مدل شخصی")
+                            }
                         }
                     }
                 }
             }
 
             retrainResult?.let { result ->
-                Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        when (result) {
-                            is RetrainResult.Success -> {
-                                Text("مدل با ${result.calibrationPointCount} نقطه آموزش دید")
-                                Text("خطای تخمینی (MARD): ${result.mardPercent?.let { "%.1f".format(it) } ?: "نامشخص"}٪")
-                                Text("سطح اعتماد: ${result.quality}")
+                item {
+                    Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                        Column(Modifier.padding(16.dp)) {
+                            when (result) {
+                                is RetrainResult.Success -> {
+                                    Text("مدل با ${result.calibrationPointCount} نقطه آموزش دید")
+                                    Text("خطای تخمینی (MARD): ${result.mardPercent?.let { "%.1f".format(it) } ?: "نامشخص"}٪")
+                                    Text("سطح اعتماد: ${result.quality}")
+                                }
+                                is RetrainResult.NotEnoughData -> Text("داده‌ی کافی برای آموزش وجود ندارد.")
                             }
-                            is RetrainResult.NotEnoughData -> Text("داده‌ی کافی برای آموزش وجود ندارد.")
                         }
                     }
                 }
             }
 
-            Text("تاریخچه‌ی ثبت‌ها", modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
-            val dateFormat = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US) }
-            LazyColumn {
-                items(readings) { reading ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("${reading.glucoseMgDl} mg/dL — ${contextLabel(reading.context)}")
-                        Text(dateFormat.format(Date(reading.timestampMs)))
-                    }
-                    Divider()
+            item {
+                Text("تاریخچه‌ی ثبت‌ها", modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+            }
+
+            items(readings) { reading ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("${reading.glucoseMgDl} mg/dL — ${contextLabel(reading.context)}")
+                    Text(dateFormat.format(Date(reading.timestampMs)))
                 }
+                Divider()
             }
         }
     }
