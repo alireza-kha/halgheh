@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GlucoRing (Experimental)</string>
+    <string name="disclaimer_title">این یک ابزار پژوهشی است</string>
+    <string name="disclaimer_body">
+        تخمین قند خون در این اپ بر پایه‌ی تغییرات نوری PPG است و در هیچ نهاد
+        معتبری برای تشخیص یا درمان پزشکی تایید نشده. همیشه تصمیم‌های درمانی
+        (تزریق انسولین، تغییر دارو و غیره) را فقط بر اساس اندازه‌گیری با سوزن
+        یا دستگاه معتبر بگیرید، نه عدد این اپ.
+    </string>
+</resources>
