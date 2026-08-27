@@ -109,10 +109,10 @@ internal class BleGattManager(private val context: Context) {
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
+        @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    @SuppressLint("MissingPermission")
                     g.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
