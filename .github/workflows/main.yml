@@ -1,4 +1,3 @@
-
 name: Android CI
 
 on:
@@ -7,6 +6,12 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+
+# The release step below needs permission to create/update a release and
+# upload an asset to it — the default GITHUB_TOKEN can't do that unless we
+# grant it explicitly here.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -53,3 +58,21 @@ jobs:
         with:
           name: glucoring-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      # Artifacts (above) expire and need a GitHub login to download. This
+      # instead publishes the same APK to a permanent, always-latest
+      # Release — one stable link, no login needed, no expiry. Every
+      # successful push to main overwrites it (moving tag), so it always
+      # reflects the current main branch.
+      - name: Publish debug APK to a rolling "latest-debug" Release
+        if: success() && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-debug
+          name: "GlucoRing — آخرین بیلد دیباگ (خودکار)"
+          body: |
+            این ریلیز خودکاره و با هر push موفق به main آپدیت می‌شه.
+            نسخه‌ی آزمایشیه — نه امضاشده برای انتشار، نه تایید شده برای مصرف پزشکی.
+            Commit: ${{ github.sha }}
+          prerelease: true
+          files: app/build/outputs/apk/debug/*.apk
