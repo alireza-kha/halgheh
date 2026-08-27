@@ -28,6 +28,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // Material3's TopAppBar (and a few other basics we use) are still
+        // marked @ExperimentalMaterial3Api upstream — opting in at the
+        // module level avoids sprinkling @OptIn on every screen.
+        freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
     }
 
     buildTypes {

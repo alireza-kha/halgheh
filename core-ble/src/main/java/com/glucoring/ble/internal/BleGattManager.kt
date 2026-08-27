@@ -85,7 +85,7 @@ internal class BleGattManager(private val context: Context) {
         if (writeQueue.size == 1) writeNext()
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "DEPRECATION")
     private fun writeNext() {
         val current = gatt ?: return
         val data = writeQueue.peek() ?: return
@@ -94,18 +94,31 @@ internal class BleGattManager(private val context: Context) {
             return
         }
         val characteristic = service.getCharacteristic(WRITE_CHARACTERISTIC) ?: return
-        characteristic.value = data
-        current.writeCharacteristic(characteristic)
+
+        // The (characteristic, value, writeType) overload was added in API 33;
+        // minSdk here is 26, so older devices still need the deprecated
+        // value-then-writeCharacteristic(characteristic) path.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            current.writeCharacteristic(characteristic, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        } else {
+            characteristic.value = data
+            current.writeCharacteristic(characteristic)
+        }
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "DEPRECATION")
     private fun enableNotifications(g: BluetoothGatt) {
         val service = g.getService(SERVICE_DATA) ?: return
         val characteristic = service.getCharacteristic(NOTIFY_CHARACTERISTIC) ?: return
         g.setCharacteristicNotification(characteristic, true)
         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG) ?: return
-        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        g.writeDescriptor(descriptor)
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            g.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+        } else {
+            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            g.writeDescriptor(descriptor)
+        }
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -142,6 +155,13 @@ internal class BleGattManager(private val context: Context) {
             if (writeQueue.isNotEmpty()) writeNext()
         }
 
+        override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            // Called instead of the 2-arg overload below on API 33+.
+            incomingFrames.trySend(value)
+        }
+
+        @Deprecated("Deprecated in Java, but still the only callback invoked on API < 33")
+        @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             val value = characteristic.value ?: return
             incomingFrames.trySend(value)

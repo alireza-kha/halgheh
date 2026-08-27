@@ -14,7 +14,11 @@ import com.glucoring.data.db.entity.PpgWindowEntity
 @Database(
     entities = [PpgWindowEntity::class, GlucoseReferenceEntity::class, CalibrationModelEntity::class],
     version = 1,
-    exportSchema = true,
+    // Schema export is off for this skeleton (no migration history to track
+    // yet). Once you start shipping schema changes, set this back to true
+    // and point KSP at an export directory via the Room Gradle plugin (see
+    // Room's migration-testing docs) so old schemas are versioned for tests.
+    exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun ppgWindowDao(): PpgWindowDao

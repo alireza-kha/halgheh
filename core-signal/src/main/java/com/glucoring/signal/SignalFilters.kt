@@ -7,12 +7,11 @@ object SignalFilters {
     fun movingAverage(samples: IntArray, windowSize: Int = 5): DoubleArray {
         if (samples.isEmpty()) return DoubleArray(0)
         val out = DoubleArray(samples.size)
-        var sum = 0.0
         val half = windowSize / 2
         for (i in samples.indices) {
             val lo = (i - half).coerceAtLeast(0)
             val hi = (i + half).coerceAtMost(samples.size - 1)
-            sum = 0.0
+            var sum = 0.0
             for (j in lo..hi) sum += samples[j]
             out[i] = sum / (hi - lo + 1)
         }
