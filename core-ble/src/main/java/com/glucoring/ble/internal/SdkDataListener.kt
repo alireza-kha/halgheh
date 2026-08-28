@@ -9,24 +9,29 @@ import com.jstyle.blesdk2301.callback.DataListener2301
  * Bridges the vendor SDK's `DataListener2301` (Java, Map-based) callback into
  * typed Kotlin events.
  *
- * The vendor SDK decodes a raw notify frame into a `Map<String, Object>` whose
- * keys come from `com.jstyle.blesdk2301.constant.DeviceKey`. The two keys this
- * app cares about most are:
- *  - `arrayPpgRawData`: the raw green-LED PPG waveform for a frame (confirmed
- *    present in this SDK build's DeviceKey constants; NOT covered by the
- *    vendor's shipped documentation, which only documents the periodic
- *    auto-measurement command below — see startVitalsAutoMeasurement()).
- *  - `heartRate` / `Blood_oxygen` / `highPressure` / `lowPressure` / `hrv`:
- *    periodic vitals from the documented 0x28 health-measurement command —
- *    these names come from the vendor doc's description of the `AutoMode`
- *    model class fields, not from a confirmed Map key dump.
+ * Verified by decompiling `BleSDK.DataParsingWithData` (CFR) rather than
+ * guessing from doc text or DeviceKey constant names — the earlier version of
+ * this file had two real bugs found that way:
  *
- * IMPORTANT: the exact key names above are best-effort, not verified against
- * a real device. Every callback is logged in full below — if vitals/PPG
- * aren't showing up in the app despite the ring notifying (check
- * BleGattManager's "onCharacteristicChanged" logs), check logcat for this
- * class's TAG and compare the real key names against what's read below, then
- * fix the mismatches here.
+ * 1. For the 0x28 (40) health-measurement response (the one
+ *    `startVitalsAutoMeasurement` triggers), the vendor SDK does NOT put
+ *    `heartRate` / `Blood_oxygen` / `hrv` / `stress` / `highPressure` /
+ *    `lowPressure` at the top level of the callback map. They're nested one
+ *    level deeper, under a `"dicData"` key, as a `Map<String, String>` (yes,
+ *    String values, e.g. `"73"` — not numbers). Reading them from the top
+ *    level as `Number` (what this file used to do) silently always returned
+ *    null.
+ *
+ * 2. Raw PPG waveform data (`arrayPpgRawData`) IS implemented in the SDK's
+ *    internal `ResolveUtil.getPPG()`, but `DataParsingWithData`'s dispatch
+ *    switch never routes any frame to it — there is no reachable code path
+ *    in this SDK build that ever produces `arrayPpgRawData`. This isn't an
+ *    undocumented-but-working feature; it's dead code in this jar. The
+ *    glucose-estimation pipeline that depends on it cannot function until
+ *    the vendor ships an SDK build that actually wires this up. The
+ *    PpgSample/onPpgFrame path below is kept as-is (harmless — it will just
+ *    never fire) so the rest of the app doesn't need to change once a
+ *    working SDK build is available.
  */
 internal class SdkDataListener(
     private val onPpgFrame: (PpgSample) -> Unit,
@@ -38,28 +43,27 @@ internal class SdkDataListener(
     }
 
     override fun dataCallback(data: Map<String, Any>) {
-        Log.d(TAG, "dataCallback(Map) keys=${data.keys}")
-        for ((key, value) in data) {
-            val preview = when (value) {
-                is IntArray -> "IntArray(size=${value.size}) first10=${value.take(10)}"
-                is List<*> -> "List(size=${value.size}) first10=${value.take(10)}"
-                else -> value.toString()
-            }
-            Log.d(TAG, "  $key = $preview")
+        Log.d(TAG, "dataCallback(Map) dataType=${data["dataType"]} keys=${data.keys}")
+
+        val dicData = data["dicData"] as? Map<*, *>
+        if (dicData != null) {
+            Log.d(TAG, "  dicData=$dicData")
         }
 
         val now = System.currentTimeMillis()
 
+        // Raw PPG waveform: see kdoc above — this key is never actually
+        // produced by this SDK build, so this branch is effectively dead
+        // until a working vendor SDK is available. Left in place on purpose.
         val rawGreen = (data["arrayPpgRawData"] as? IntArray)
             ?: (data["arrayPpgRawData"] as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.toIntArray()
-
         if (rawGreen != null) {
             onPpgFrame(
                 PpgSample(
                     timestampMs = now,
                     rawGreen = rawGreen,
-                    heartRateBpm = (data["heartRate"] as? Number)?.toInt(),
-                    spo2Percent = (data["Blood_oxygen"] as? Number)?.toInt(),
+                    heartRateBpm = dicData?.stringField("heartRate"),
+                    spo2Percent = dicData?.stringField("Blood_oxygen"),
                     accelX = toIntArrayOrNull(data["arrayX"]),
                     accelY = toIntArrayOrNull(data["arrayY"]),
                     accelZ = toIntArrayOrNull(data["arrayZ"]),
@@ -67,31 +71,29 @@ internal class SdkDataListener(
             )
         }
 
-        val hasVitals = data.containsKey("heartRate") || data.containsKey("Blood_oxygen") ||
-            data.containsKey("highPressure") || data.containsKey("hrv")
-        if (hasVitals) {
+        if (dicData != null) {
             onVitals(
                 VitalsSample(
                     timestampMs = now,
-                    heartRateBpm = (data["heartRate"] as? Number)?.toInt(),
-                    spo2Percent = (data["Blood_oxygen"] as? Number)?.toInt(),
-                    systolic = (data["highPressure"] as? Number)?.toInt(),
-                    diastolic = (data["lowPressure"] as? Number)?.toInt(),
-                    hrv = (data["hrv"] as? Number)?.toInt(),
-                    stress = (data["stress"] as? Number)?.toInt(),
+                    heartRateBpm = dicData.stringField("heartRate"),
+                    spo2Percent = dicData.stringField("Blood_oxygen"),
+                    systolic = dicData.stringField("highPressure"),
+                    diastolic = dicData.stringField("lowPressure"),
+                    hrv = dicData.stringField("hrv"),
+                    stress = dicData.stringField("stress"),
                 )
             )
         } else {
-            Log.d(TAG, "dataCallback(Map): no known vitals keys present in this frame")
+            Log.d(TAG, "dataCallback(Map): no dicData in this frame (dataType=${data["dataType"]}) — not a vitals-measurement response")
         }
     }
 
     override fun dataCallback(raw: ByteArray) {
         Log.d(TAG, "dataCallback(byte[]): [${raw.joinToString(" ") { "%02x".format(it) }}]")
-        // Some frame types are surfaced only as raw bytes by the SDK.
-        // Not currently needed for the glucose pipeline — left as an
-        // extension point (e.g. for firmware/debug frames).
     }
+
+    /** dicData's values are Strings (e.g. "73"), confirmed from the decompiled ResolveUtil helpers. */
+    private fun Map<*, *>.stringField(key: String): Int? = (this[key] as? String)?.toIntOrNull()
 
     private fun toIntArrayOrNull(value: Any?): IntArray? = when (value) {
         is IntArray -> value

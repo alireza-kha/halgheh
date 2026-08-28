@@ -55,7 +55,10 @@ class GlucoRingBleClient(context: Context) {
         // the result comes back through `listener` (see SdkDataListener).
         scope.launch {
             gatt.observeRawFrames().collect { frame ->
-                android.util.Log.d(TAG, "observeRawFrames: got ${frame.size} bytes, handing to BleSDK.DataParsingWithData")
+                android.util.Log.d(
+                    TAG,
+                    "observeRawFrames: got ${frame.size} bytes [${frame.joinToString(" ") { "%02x".format(it) }}] (byte0=${frame.getOrNull(0)?.toInt()?.and(0xFF)}), handing to BleSDK.DataParsingWithData"
+                )
                 BleSDK.DataParsingWithData(frame, listener)
             }
         }
